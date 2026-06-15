@@ -1,0 +1,111 @@
+-- ============================================
+-- 1. Clear compiled‐plan cache (so Stage 1 is truly cold)
+-- ============================================
+ALTER WAREHOUSE SNOWFLAKE_LEARNING_WH SUSPEND;
+ALTER WAREHOUSE SNOWFLAKE_LEARNING_WH RESUME;
+
+-- ============================================
+-- 2. Disable result cache so Profile shows full work
+-- ============================================
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
+
+-- ============================================
+-- 3. Context Setup
+-- ============================================
+USE ROLE   SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;
+USE DATABASE SNOWFLAKE_LEARNING_DB;
+SET schema_name = CONCAT(current_user(), '_LOAD_SAMPLE_DATA_FROM_S3');
+USE SCHEMA IDENTIFIER($schema_name);
+
+-- ============================================
+-- 4. Stage 1: Raw SQL with hard‐coded literal     ← highest compile time
+-- ============================================
+SELECT
+  menu_item_id,
+  menu_item_name,
+  truck_brand_name,
+  sale_price_usd,
+  cost_of_goods_usd
+FROM menu
+WHERE truck_brand_name = 'Freezing Point'
+ORDER BY sale_price_usd DESC;
+
+-- ============================================
+-- 5. Stage 2: Same SELECT but using session var  ← medium compile time
+-- ============================================
+SET brand_filter = 'Freezing Point';
+
+SELECT
+  menu_item_id,
+  menu_item_name,
+  truck_brand_name,
+  sale_price_usd,
+  cost_of_goods_usd
+FROM menu
+WHERE truck_brand_name = $brand_filter
+ORDER BY sale_price_usd DESC;
+
+-- ============================================
+-- 6. Stage 3: Same SELECT against a view         ← low compile time
+-- ============================================
+CREATE OR REPLACE VIEW vw_menu_pricing AS
+SELECT
+  menu_item_id,
+  menu_item_name,
+  truck_brand_name,
+  sale_price_usd,
+  cost_of_goods_usd
+FROM menu;
+
+SELECT
+  menu_item_id,
+  menu_item_name,
+  truck_brand_name,
+  sale_price_usd,
+  cost_of_goods_usd
+FROM vw_menu_pricing
+WHERE truck_brand_name = $brand_filter
+ORDER BY sale_price_usd DESC;
+
+-- ============================================
+-- 7. Stage 4: Same SELECT against a CTAS table ← very low compile time
+--    (***now includes identical WHERE clause***)
+-- ============================================
+CREATE OR REPLACE TABLE ct_menu_pricing AS
+SELECT
+  menu_item_id,
+  menu_item_name,
+  truck_brand_name,
+  sale_price_usd,
+  cost_of_goods_usd
+FROM menu
+WHERE truck_brand_name = $brand_filter;
+
+SELECT
+  menu_item_id,
+  menu_item_name,
+  truck_brand_name,
+  sale_price_usd,
+  cost_of_goods_usd
+FROM ct_menu_pricing
+ORDER BY sale_price_usd DESC;
+
+-- ============================================
+-- 8. Pull the last four SELECT runs for comparison
+-- ============================================
+SELECT
+  query_text,
+  start_time,
+  total_elapsed_time,
+  compilation_time,
+  execution_time,
+  rows_produced
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+WHERE user_name   = CURRENT_USER()
+  AND start_time > DATEADD('hour', -2, CURRENT_TIMESTAMP())
+  AND query_text ILIKE '%menu_item_id%'         -- catch all four SELECTs
+  AND query_text NOT ILIKE '%QUERY_HISTORY%'
+  AND query_text NOT ILIKE '%CREATE OR REPLACE%'
+ORDER BY start_time DESC
+LIMIT 4;

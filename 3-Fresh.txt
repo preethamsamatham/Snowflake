@@ -1,0 +1,184 @@
+-- ============================================
+-- Disable result cache
+-- ============================================
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
+
+-- ============================================
+-- Context setup
+-- ============================================
+USE ROLE SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;
+USE DATABASE SNOWFLAKE_LEARNING_DB;
+SET schema_name = CONCAT(current_user(), '_LOAD_SAMPLE_DATA_FROM_S3');
+USE SCHEMA IDENTIFIER($schema_name);
+
+-- ============================================
+-- Common query logic
+--   counts items with sale_price_usd > 10
+-- ============================================
+SELECT
+  truck_brand_name,
+  COUNT(menu_item_id) AS high_price_count
+FROM menu
+WHERE sale_price_usd > 10
+GROUP BY truck_brand_name
+ORDER BY high_price_count DESC;
+
+-- ============================================
+-- Stage 1: standard view
+-- ============================================
+CREATE OR REPLACE VIEW vw_high_price_items AS
+SELECT
+  truck_brand_name,
+  COUNT(menu_item_id) AS high_price_count
+FROM menu
+WHERE sale_price_usd > 10
+GROUP BY truck_brand_name;
+
+-- run the view
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM vw_high_price_items
+ORDER BY high_price_count DESC;
+
+-- ============================================
+-- Stage 2: materialized view
+-- ============================================
+CREATE OR REPLACE MATERIALIZED VIEW mv_high_price_items AS
+SELECT
+  truck_brand_name,
+  COUNT(menu_item_id) AS high_price_count
+FROM menu
+WHERE sale_price_usd > 10
+GROUP BY truck_brand_name;
+
+-- first read builds the materialized view
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM mv_high_price_items
+ORDER BY high_price_count DESC;
+
+-- second read uses precomputed data
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM mv_high_price_items
+ORDER BY high_price_count DESC;
+
+-- ============================================
+-- Stage 3: CTAS table
+-- ============================================
+CREATE OR REPLACE TABLE ct_high_price_items AS
+SELECT
+  truck_brand_name,
+  COUNT(menu_item_id) AS high_price_count
+FROM menu
+WHERE sale_price_usd > 10
+GROUP BY truck_brand_name;
+
+-- query the CTAS table
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM ct_high_price_items
+ORDER BY high_price_count DESC;
+
+-- ============================================
+-- Stage 4: freshness demonstration
+--   insert a unique test row for 'Unique Test Truck'
+-- ============================================
+INSERT INTO menu (
+  menu_item_id,
+  menu_item_name,
+  truck_brand_name,
+  sale_price_usd,
+  cost_of_goods_usd
+) VALUES (
+  9999,
+  'Test Special',
+  'Unique Test Truck',
+  20,
+  5
+);
+
+-- view shows new row immediately
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM vw_high_price_items
+WHERE truck_brand_name = 'Unique Test Truck';
+
+-- materialized view is stale until replaced
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM mv_high_price_items
+WHERE truck_brand_name = 'Unique Test Truck';
+
+CREATE OR REPLACE MATERIALIZED VIEW mv_high_price_items AS
+SELECT
+  truck_brand_name,
+  COUNT(menu_item_id) AS high_price_count
+FROM menu
+WHERE sale_price_usd > 10
+GROUP BY truck_brand_name;
+
+-- now MV shows new row
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM mv_high_price_items
+WHERE truck_brand_name = 'Unique Test Truck';
+
+-- CTAS table is stale until recreated
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM ct_high_price_items
+WHERE truck_brand_name = 'Unique Test Truck';
+
+CREATE OR REPLACE TABLE ct_high_price_items AS
+SELECT
+  truck_brand_name,
+  COUNT(menu_item_id) AS high_price_count
+FROM menu
+WHERE sale_price_usd > 10
+GROUP BY truck_brand_name;
+
+-- now CTAS shows new row
+SELECT
+  truck_brand_name,
+  high_price_count
+FROM ct_high_price_items
+WHERE truck_brand_name = 'Unique Test Truck';
+
+-- ============================================
+-- Stage 5: compare performance & cost
+--   capture recent runs in information_schema
+-- ============================================
+SELECT
+  query_text,
+  start_time,
+  total_elapsed_time,
+  rows_produced,
+  credits_used_cloud_services
+FROM TABLE(
+  INFORMATION_SCHEMA.QUERY_HISTORY(
+    DATEADD('hour', -2, CURRENT_TIMESTAMP()),  -- lookback
+    CURRENT_TIMESTAMP()
+  )
+)
+WHERE user_name = CURRENT_USER()
+  AND (
+       query_text ILIKE '%FROM menu WHERE sale_price_usd > 10%'
+    OR query_text ILIKE '%FROM vw_high_price_items%'
+    OR query_text ILIKE '%FROM mv_high_price_items%'
+    OR query_text ILIKE '%FROM ct_high_price_items%'
+  )
+  AND query_text NOT ILIKE '%INFORMATION_SCHEMA.QUERY_HISTORY%'  -- exclude this pull
+  AND query_text NOT ILIKE 'CREATE OR REPLACE%'                   -- exclude DDL
+ORDER BY start_time DESC
+LIMIT 10;
+

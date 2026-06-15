@@ -1,0 +1,28 @@
+-- ============================================
+-- Disable result cache so Profile shows full work
+-- ============================================
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
+
+-- ============================================
+-- Context Setup
+-- ============================================
+USE ROLE SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;  
+USE DATABASE SNOWFLAKE_SAMPLE_DATA;
+USE SCHEMA TPCH_SF1;
+
+-- ============================================
+-- Stage 1: Baseline Query with Join + Group + Sort
+--   • joins ORDERS and LINEITEM on orderkey
+--   • filters for high-value orders
+--   • groups by order priority
+-- ============================================
+SELECT
+  o.o_orderpriority,
+  COUNT(*) AS order_count
+FROM orders o
+JOIN lineitem l
+  ON o.o_orderkey = l.l_orderkey
+WHERE o.o_totalprice > 100000
+GROUP BY o.o_orderpriority
+ORDER BY order_count DESC;
