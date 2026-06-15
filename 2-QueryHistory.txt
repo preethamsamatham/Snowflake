@@ -1,0 +1,75 @@
+-- ============================================================
+-- Context Setup: Set role, warehouse, and target database
+-- ============================================================
+USE ROLE SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;
+USE DATABASE SNOWFLAKE_LEARNING_DB;
+
+-- ============================================================
+-- 1. Recent Query Activity (Past 1 Hour)
+-- Shows query activity across the account using QUERY_HISTORY
+-- ============================================================
+SELECT 
+  query_id,
+  user_name,
+  warehouse_name,
+  execution_status,
+  start_time,
+  total_elapsed_time,
+  rows_produced,
+  error_message
+FROM TABLE(SNOWFLAKE.INFORMATION_SCHEMA.QUERY_HISTORY(
+    DATEADD('hour', -1, CURRENT_TIMESTAMP()),  -- start_time
+    CURRENT_TIMESTAMP()                        -- end_time
+))
+ORDER BY start_time DESC;
+
+-- ============================================================
+-- 2. Query History for a Specific User (Past 24 Hours)
+-- Replace 'PD' with the actual case-sensitive user name
+-- ============================================================
+SELECT 
+  query_text,
+  start_time,
+  execution_status,
+  total_elapsed_time,
+  rows_produced
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+WHERE user_name = 'PD'  -- Case sensitive
+  AND start_time >= DATEADD('day', -1, CURRENT_DATE())
+ORDER BY start_time DESC;
+
+-- ============================================================
+-- 3. Warehouse Load Monitoring (Last 6 Hours)
+-- Tracks concurrency, queueing, and blocking on warehouse
+-- ============================================================
+SELECT 
+  warehouse_name,
+  start_time,
+  end_time,
+  avg_running,
+  avg_queued_load,
+  avg_queued_provisioning,
+  avg_blocked
+FROM SNOWFLAKE.ACCOUNT_USAGE.WAREHOUSE_LOAD_HISTORY
+WHERE warehouse_name = 'SNOWFLAKE_LEARNING_WH'
+  AND start_time >= DATEADD('hour', -6, CURRENT_TIMESTAMP())
+ORDER BY start_time DESC;
+
+-- ============================================================
+-- 4. Failed Queries (Past 24 Hours)
+-- Filters only failed executions to help spot issues
+-- ============================================================
+SELECT 
+  query_id,
+  user_name,
+  error_message,
+  start_time,
+  query_text, 
+  execution_status
+FROM TABLE(SNOWFLAKE.INFORMATION_SCHEMA.QUERY_HISTORY(
+    DATEADD('day', -1, CURRENT_TIMESTAMP()),  -- start_time
+    CURRENT_TIMESTAMP()                       -- end_time
+))
+WHERE execution_status = 'FAILED_WITH_ERROR'
+ORDER BY start_time DESC;

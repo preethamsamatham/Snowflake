@@ -1,0 +1,32 @@
+-- ============================================================
+-- TPCH Join with Filter, Group By, and Order By
+-- ============================================================
+USE DATABASE SNOWFLAKE_SAMPLE_DATA;
+USE SCHEMA TPCH_SF1;
+
+SELECT
+  o.o_orderpriority,
+  COUNT(*) AS order_count
+FROM orders o
+JOIN lineitem l
+  ON o.o_orderkey = l.l_orderkey
+WHERE o.o_orderstatus = 'F'
+  AND l.l_shipdate > o.o_orderdate
+GROUP BY o.o_orderpriority
+ORDER BY order_count DESC;
+
+-- ============================================================
+-- Aggregate Query History for Queries Involving "orders" Table
+-- ============================================================
+SELECT 
+  query_text,
+  COUNT(*) AS num_runs,
+  SUM(total_elapsed_time) AS total_latency_ms,
+  AVG(total_elapsed_time) AS avg_latency_ms,
+  SUM(bytes_scanned) AS total_bytes_scanned,
+  SUM(rows_produced) AS total_rows_produced
+FROM SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY
+WHERE start_time >= DATEADD('day', -1, CURRENT_TIMESTAMP())
+  AND query_text ILIKE '%orders%'
+GROUP BY query_text
+ORDER BY total_latency_ms DESC;

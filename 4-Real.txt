@@ -1,0 +1,31 @@
+-- ============================================
+-- Context Setup for Tasty Bytes Queries
+-- ============================================
+USE ROLE SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;
+USE DATABASE SNOWFLAKE_LEARNING_DB;
+
+-- Dynamically set schema based on current user
+SET schema_name = CONCAT(current_user(), '_LOAD_SAMPLE_DATA_FROM_S3');
+USE SCHEMA IDENTIFIER($schema_name);
+
+-- ============================================================
+-- Disable query cache to ensure full execution path
+-- ============================================================
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
+
+-- ============================================================
+-- Query1: Function on WHERE Clause
+-- ============================================================
+SELECT menu_item_name, sale_price_usd
+FROM menu
+WHERE LEFT(menu_item_name, 1) = 'C';
+
+-- ============================================================
+-- Query2: Avoid Function to Enable Pruning
+-- ============================================================
+SELECT menu_item_name, sale_price_usd
+FROM menu
+WHERE menu_item_name LIKE 'C%';
+
+
