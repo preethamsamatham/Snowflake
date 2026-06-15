@@ -1,0 +1,53 @@
+-- ============================================
+-- Disable result cache so Profile shows full work
+-- ============================================
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
+
+-- ============================================
+-- Context Setup
+-- ============================================
+USE ROLE SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;
+USE DATABASE SNOWFLAKE_SAMPLE_DATA;
+USE SCHEMA TPCH_SF1;
+
+-- ============================================
+-- Stage 1: Baseline Query (correlated subquery)
+--   • for each customer, runs a subquery over ORDERS  
+--   • filters customers having more than 5 large orders  
+-- ============================================
+SELECT
+  c.c_name,
+  ( SELECT COUNT(*) 
+    FROM orders o
+    WHERE o.o_custkey = c.c_custkey
+      AND o.o_totalprice > 10000
+  ) AS large_order_count
+FROM customer c
+WHERE 
+  ( SELECT COUNT(*) 
+    FROM orders o
+    WHERE o.o_custkey = c.c_custkey
+      AND o.o_totalprice > 10000
+  ) > 5
+ORDER BY large_order_count DESC,
+         c_name ASC
+LIMIT 10;
+
+-- ============================================
+-- Stage 2: Refactored Query (join + aggregation)
+--   • joins CUSTOMER to filtered ORDERS once  
+--   • uses GROUP BY and HAVING to filter counts  
+-- ============================================
+SELECT
+  c.c_name,
+  COUNT(o.o_orderkey) AS large_order_count
+FROM customer c
+JOIN orders o
+  ON o.o_custkey     = c.c_custkey
+  AND o.o_totalprice > 10000
+GROUP BY c.c_name
+HAVING COUNT(o.o_orderkey) > 5
+ORDER BY large_order_count DESC,
+         c_name ASC
+LIMIT 10;

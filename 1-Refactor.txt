@@ -1,0 +1,60 @@
+-- ============================================
+-- Disable result cache so Profile shows full work
+-- ============================================
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
+
+-- ============================================
+-- Context Setup
+-- ============================================
+USE ROLE SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;
+USE DATABASE SNOWFLAKE_LEARNING_DB;
+SET schema_name = CONCAT(current_user(), '_LOAD_SAMPLE_DATA_FROM_S3');
+USE SCHEMA IDENTIFIER($schema_name);
+
+-- ============================================
+-- Stage 1: Baseline Query (two CTEs + join)
+--   • uses CTEs to apply the same three filters via a self‐join  
+-- ============================================
+WITH 
+  high_price AS (
+    SELECT
+      menu_item_id,
+      truck_brand_name,
+      sale_price_usd,
+      cost_of_goods_usd
+    FROM menu
+    WHERE sale_price_usd > 12
+  ),
+  low_cost AS (
+    SELECT
+      menu_item_id,
+      truck_brand_name,
+      cost_of_goods_usd AS lc_cost
+    FROM menu
+    WHERE cost_of_goods_usd < 8
+  )
+SELECT
+  hp.truck_brand_name,
+  COUNT(DISTINCT hp.menu_item_id) AS high_margin_items
+FROM high_price hp
+JOIN low_cost lc
+  ON hp.truck_brand_name = lc.truck_brand_name
+  AND hp.menu_item_id    = lc.menu_item_id
+WHERE (hp.sale_price_usd - hp.cost_of_goods_usd) > 5
+GROUP BY hp.truck_brand_name
+ORDER BY hp.truck_brand_name;
+
+-- ============================================
+-- Stage 2: Refactored Query (single scan + inline filters)
+--   • applies the three filters in one WHERE clause  
+-- ============================================
+SELECT
+  truck_brand_name,
+  COUNT(DISTINCT menu_item_id) AS high_margin_items
+FROM menu
+WHERE sale_price_usd   > 12
+  AND cost_of_goods_usd < 8
+  AND (sale_price_usd - cost_of_goods_usd) > 5
+GROUP BY truck_brand_name
+ORDER BY truck_brand_name;

@@ -1,0 +1,99 @@
+-- ============================================
+-- Disable result cache so Profile shows full work
+-- ============================================
+ALTER SESSION SET USE_CACHED_RESULT = FALSE;
+
+-- ============================================
+-- Context Setup
+-- ============================================
+USE ROLE SNOWFLAKE_LEARNING_ROLE;
+USE WAREHOUSE SNOWFLAKE_LEARNING_WH;
+USE DATABASE SNOWFLAKE_LEARNING_DB;
+
+-- create and switch into a fixed schema for this demo
+CREATE SCHEMA IF NOT EXISTS PS;
+USE SCHEMA PS;
+
+-- ============================================
+-- Stage 1: Create a Permanent Table
+--   • full data retention, includes fail-safe
+--   • higher storage cost but durable
+-- ============================================
+CREATE OR REPLACE TABLE orders_perm AS
+  SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS;
+
+-- ============================================
+-- Stage 2: Create a Transient Table
+--   • no fail-safe retention, lower storage cost
+--   • metadata caching and performance same as permanent
+-- ============================================
+CREATE OR REPLACE TRANSIENT TABLE orders_trans AS
+  SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS;
+
+-- ============================================
+-- Stage 3: Create a Temporary Table
+--   • session-scoped, auto-dropped at session end
+--   • no fail-safe, lowest storage cost, ideal for ad hoc
+-- ============================================
+CREATE OR REPLACE TEMPORARY TABLE orders_temp AS
+  SELECT * FROM SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS;
+
+-- ============================================
+-- Stage 5: Run a Sample Query on Each Table
+--   • identical filter and aggregation to compare profiles
+-- ============================================
+-- Permanent table
+SELECT o_orderdate, COUNT(*) AS cnt
+FROM orders_perm
+WHERE o_orderdate BETWEEN '1993-01-01' AND '1993-03-31'
+GROUP BY o_orderdate
+ORDER BY o_orderdate;
+
+-- Transient table
+SELECT o_orderdate, COUNT(*) AS cnt
+FROM orders_trans
+WHERE o_orderdate BETWEEN '1993-01-01' AND '1993-03-31'
+GROUP BY o_orderdate
+ORDER BY o_orderdate;
+
+-- Temporary table
+SELECT o_orderdate, COUNT(*) AS cnt
+FROM orders_temp
+WHERE o_orderdate BETWEEN '1993-01-01' AND '1993-03-31'
+GROUP BY o_orderdate
+ORDER BY o_orderdate;
+
+--   → Compare History metrics and Query Profiles:
+--     • all three queries scan the same micro-partitions
+--     • performance is identical, but storage and retention costs differ
+
+-- ============================================
+-- Inspect table types, retention and flags
+-- ============================================
+SELECT
+  table_name,
+  table_type,
+  is_transient,
+  is_temporary,
+  retention_time        AS retention_days,
+  row_count,
+  bytes
+FROM information_schema.tables
+WHERE table_schema = 'PS'
+  AND table_name IN ('ORDERS_PERM','ORDERS_TRANS','ORDERS_TEMP')
+ORDER BY table_name;
+
+-- ============================================
+-- Storage breakdown (Active / Time-Travel / Fail-Safe)
+--    (Only BASE and TRANSIENT tables show up here; TEMPORARY tables are session-scoped)
+-- ============================================
+SELECT
+  table_name,
+  active_bytes,
+  time_travel_bytes,
+  failsafe_bytes
+FROM snowflake.account_usage.table_storage_metrics
+WHERE table_schema = 'PS'
+  AND table_name IN ('ORDERS_PERM','ORDERS_TRANS','ORDERS_TEMP')
+ORDER BY table_name;
+
